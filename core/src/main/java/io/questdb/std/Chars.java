@@ -40,6 +40,13 @@ public final class Chars {
     private Chars() {
     }
 
+    public static long toMemory(CharSequence sequence) {
+        int length = sequence.length();
+        long ptr = Unsafe.malloc(length);
+        asciiStrCpy(sequence, length, ptr);
+        return ptr;
+    }
+
     public static void asciiCopyTo(char[] chars, int start, int len, long dest) {
         for (int i = 0; i < len; i++) {
             Unsafe.getUnsafe().putByte(dest + i, (byte) chars[i + start]);
@@ -50,6 +57,14 @@ public final class Chars {
         for (int i = 0; i < len; i++) {
             Unsafe.getUnsafe().putByte(address + i, (byte) value.charAt(i));
         }
+    }
+
+    public static String asciiStrRead(final long address, final int len) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < len; i++) {
+            builder.append((char) Unsafe.getUnsafe().getByte(address + i));
+        }
+        return builder.toString();
     }
 
     public static void asciiStrCpy(final CharSequence value, int lo, final int len, final long address) {

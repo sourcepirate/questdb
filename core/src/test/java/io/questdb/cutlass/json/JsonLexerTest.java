@@ -55,7 +55,7 @@ public class JsonLexerTest {
         TestUtils.assertMemoryLeak(() -> {
             String json = "{\"a\":1, \"b\": \"123456789012345678901234567890\"]}";
             int len = json.length() - 6;
-            long address = TestUtils.toMemory(json);
+            long address = Chars.toMemory(json);
             try (JsonLexer lexer = new JsonLexer(4, 4)) {
                 try {
                     lexer.parse(address, address + len, listener);
@@ -82,7 +82,7 @@ public class JsonLexerTest {
     public void testBreakOnValue() throws Exception {
         String in = "{\"x\": \"abcdefhijklmn\"}";
         int len = in.length();
-        long address = TestUtils.toMemory(in);
+        long address = Chars.toMemory(in);
         try {
             LEXER.parse(address, address + len - 7, listener);
             LEXER.parse(address + len - 7, address + len, listener);
@@ -665,7 +665,7 @@ public class JsonLexerTest {
 
     private void assertError(String expected, int expectedPosition, String input) {
         int len = input.length();
-        long address = TestUtils.toMemory(input);
+        long address = Chars.toMemory(input);
         try (JsonLexer lexer = new JsonLexer(4, 4)) {
             for (int i = 0; i < len; i++) {
                 try {

@@ -27,6 +27,7 @@ package io.questdb.cutlass.text;
 import io.questdb.cutlass.json.JsonException;
 import io.questdb.cutlass.json.JsonLexer;
 import io.questdb.cutlass.text.types.TypeManager;
+import io.questdb.std.Chars;
 import io.questdb.std.Unsafe;
 import io.questdb.std.str.DirectCharSink;
 import io.questdb.test.tools.TestUtils;
@@ -83,7 +84,7 @@ public class TextMetadataParserTest {
                 "{\"name\": \"y\", \"type\": \"DATE\", \"pattern\":\"xyz\"}\n" +
                 "]";
 
-        long buf = TestUtils.toMemory(in);
+        long buf = Chars.toMemory(in);
         try {
             LEXER.parse(buf, buf + in.length(), textMetadataParser);
             Assert.assertEquals(2, textMetadataParser.getColumnTypes().size());
@@ -99,7 +100,7 @@ public class TextMetadataParserTest {
     public void testEmptyList() throws Exception {
         String in = "[]";
 
-        long buf = TestUtils.toMemory(in);
+        long buf = Chars.toMemory(in);
         try {
             LEXER.parse(buf, buf + in.length(), textMetadataParser);
             Assert.assertEquals(0, textMetadataParser.getColumnTypes().size());
@@ -183,7 +184,7 @@ public class TextMetadataParserTest {
     }
 
     private void assertFailure(CharSequence schema, int position, CharSequence message) {
-        long buf = TestUtils.toMemory(schema);
+        long buf = Chars.toMemory(schema);
         try {
             LEXER.parse(buf, buf + schema.length(), textMetadataParser);
             Assert.fail();

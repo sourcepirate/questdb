@@ -4710,7 +4710,7 @@ public class IODispatcherTest {
                         connectLatch.await();
 
                         int len = request.length();
-                        long buffer = TestUtils.toMemory(request);
+                        long buffer = Chars.toMemory(request);
                         try {
                             Assert.assertEquals(len, Net.send(fd, buffer, len));
                         } finally {
@@ -4881,7 +4881,7 @@ public class IODispatcherTest {
                         connectLatch.await();
 
                         int len = request.length();
-                        long buffer = TestUtils.toMemory(request);
+                        long buffer = Chars.toMemory(request);
                         try {
                             Assert.assertEquals(len, Net.send(fd, buffer, len));
                             // read response we expect
@@ -5035,7 +5035,7 @@ public class IODispatcherTest {
                         connectLatch.await();
 
                         int len = request.length();
-                        long buffer = TestUtils.toMemory(request);
+                        long buffer = Chars.toMemory(request);
                         try {
                             int part1 = len / 2;
                             Assert.assertEquals(part1, Net.send(fd, buffer, part1));
@@ -5288,7 +5288,7 @@ public class IODispatcherTest {
                                     Assert.assertEquals(0, Net.connect(fd, sockAddr));
 
                                     int len = request.length();
-                                    long buffer = TestUtils.toMemory(request);
+                                    long buffer = Chars.toMemory(request);
                                     try {
                                         Assert.assertEquals(len, Net.send(fd, buffer, len));
                                         Assert.assertEquals("fd=" + fd + ", i=" + i, 1, Net.recv(fd, buffer, 1));

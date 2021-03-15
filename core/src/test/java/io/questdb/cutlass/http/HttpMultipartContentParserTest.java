@@ -28,6 +28,7 @@ import io.questdb.cutlass.http.ex.RetryOperationException;
 import io.questdb.network.PeerDisconnectedException;
 import io.questdb.network.PeerIsSlowToReadException;
 import io.questdb.network.ServerDisconnectException;
+import io.questdb.std.Chars;
 import io.questdb.std.ObjectPool;
 import io.questdb.std.Unsafe;
 import io.questdb.std.str.DirectByteCharSequence;
@@ -55,10 +56,10 @@ public class HttpMultipartContentParserTest {
                 final String expected = "";
 
                 int len = content.length();
-                long p = TestUtils.toMemory(content);
+                long p = Chars.toMemory(content);
                 try {
                     String boundary = "\r\n------WebKitFormBoundaryxFKYDBybTLu2rb8P";
-                    long pBoundary = TestUtils.toMemory(boundary);
+                    long pBoundary = Chars.toMemory(boundary);
                     DirectByteCharSequence boundaryCs = new DirectByteCharSequence().of(pBoundary, pBoundary + boundary.length());
                     try {
                         for (int i = 0; i < len; i++) {
@@ -88,10 +89,10 @@ public class HttpMultipartContentParserTest {
             try (HttpMultipartContentParser multipartContentParser = new HttpMultipartContentParser(new HttpHeaderParser(1024, pool))) {
                 final String content = "------WebKitFormBoundaryxFKYDBybTLu2rb8PA--\r\n";
                 int len = content.length();
-                long p = TestUtils.toMemory(content);
+                long p = Chars.toMemory(content);
                 try {
                     String boundary = "\r\n------WebKitFormBoundaryxFKYDBybTLu2rb8P";
-                    long pBoundary = TestUtils.toMemory(boundary);
+                    long pBoundary = Chars.toMemory(boundary);
                     DirectByteCharSequence boundaryCs = new DirectByteCharSequence().of(pBoundary, pBoundary + boundary.length());
                     try {
                         multipartContentParser.of(boundaryCs);
@@ -153,10 +154,10 @@ public class HttpMultipartContentParserTest {
                         "-----------------------------\r\n";
 
                 int len = content.length();
-                long p = TestUtils.toMemory(content);
+                long p = Chars.toMemory(content);
                 try {
                     String boundary = "\r\n------WebKitFormBoundaryxFKYDBybTLu2rb8P";
-                    long pBoundary = TestUtils.toMemory(boundary);
+                    long pBoundary = Chars.toMemory(boundary);
                     DirectByteCharSequence boundaryCs = new DirectByteCharSequence().of(pBoundary, pBoundary + boundary.length());
                     try {
                         for (int i = 0; i < len; i++) {
@@ -186,10 +187,10 @@ public class HttpMultipartContentParserTest {
             try (HttpMultipartContentParser multipartContentParser = new HttpMultipartContentParser(new HttpHeaderParser(1024, pool))) {
                 final String content = "------WebKitFormBoundaryxSLJiij2s--\r\n";
                 int len = content.length();
-                long p = TestUtils.toMemory(content);
+                long p = Chars.toMemory(content);
                 try {
                     String boundary = "\r\n------WebKitFormBoundaryxFKYDBybTLu2rb8P";
-                    long pBoundary = TestUtils.toMemory(boundary);
+                    long pBoundary = Chars.toMemory(boundary);
                     DirectByteCharSequence boundaryCs = new DirectByteCharSequence().of(pBoundary, pBoundary + boundary.length());
                     try {
                         multipartContentParser.of(boundaryCs);
@@ -248,9 +249,9 @@ public class HttpMultipartContentParserTest {
                 if (breakAt >= content.length()) return;
 
                 int len = content.length();
-                long p = TestUtils.toMemory(content);
+                long p = Chars.toMemory(content);
                 try {
-                    long pBoundary = TestUtils.toMemory(boundary);
+                    long pBoundary = Chars.toMemory(boundary);
                     DirectByteCharSequence boundaryCs = new DirectByteCharSequence().of(pBoundary, pBoundary + boundary.length());
                     try {
                         multipartContentParser.clear();

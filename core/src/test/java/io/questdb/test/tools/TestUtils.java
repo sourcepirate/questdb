@@ -201,7 +201,7 @@ public final class TestUtils {
 
             try {
                 long bufa = Unsafe.malloc(4096);
-                final long str = toMemory(actual);
+                final long str = Chars.toMemory(actual);
                 long offset = 0;
                 long strp = str;
                 try {
@@ -346,12 +346,6 @@ public final class TestUtils {
         } catch (IOException e) {
             throw new RuntimeException("Cannot read from " + file.getAbsolutePath(), e);
         }
-    }
-
-    public static long toMemory(CharSequence sequence) {
-        long ptr = Unsafe.malloc(sequence.length());
-        Chars.asciiStrCpy(sequence, sequence.length(), ptr);
-        return ptr;
     }
 
     // used in tests
