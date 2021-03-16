@@ -217,6 +217,10 @@ public:
     void store(void * p) const {
         _mm256_storeu_si256((__m256i*)p, ymm);
     }
+    // Member function to store into array (unaligned) with non-temporal memory hint
+    void store_nt(void * p) const {
+        _mm256_stream_si256((__m256i*)p, ymm);
+    }
     // Member function to store into array, aligned by 32
     // You may use store_a instead of store if you are certain that p points to an address
     // divisible by 32, but there is hardly any speed advantage of load_a on modern processors

@@ -23,11 +23,11 @@ set(
         src/main/c/share/vec_agg_vanilla.cpp
         src/main/c/share/vec_agg.cpp
         src/main/c/share/vec_int_key_agg.cpp
-        src/main/c/share/vec_ts_agg.cpp
-)
+        src/main/c/share/vec_ts_agg.cpp)
 
 set(
         SOURCE_FILES
+        src/main/c/share/simd.h
         src/main/c/share/files.h
         src/main/c/share/zip.h
         src/main/c/share/net.h
@@ -35,8 +35,8 @@ set(
         src/main/c/share/os.h
         src/main/c/share/vec_agg_vanilla.h
         src/main/c/share/util.cpp
-        src/main/c/share/ooo.cpp
         src/main/c/share/vect.cpp
+        src/main/c/share/ooo.cpp
 )
 
 # JNI includes
@@ -68,6 +68,11 @@ elseif (UNIX)
         )
     else (CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
         MESSAGE("Building for GNU/Linux")
+        MESSAGE("Enabling multiversion compilation")
+        add_compile_definitions(ENABLE_MULTIVERSION)
+#        add_compile_definitions(ENABLE_ASMLIB)
+#        add_compile_definitions(ENABLE_MANUAL_MEMCPY)
+
         include_directories($ENV{JAVA_HOME}/include/linux/)
         message(${CMAKE_SYSTEM_PROCESSOR})
         if (CMAKE_SYSTEM_PROCESSOR MATCHES "^aarch64")
@@ -209,8 +214,12 @@ else ()
 
     set_target_properties(
             questdb PROPERTIES
-            COMPILE_FLAGS "-m64 -O3 "
+            COMPILE_FLAGS "-m64 -O3"
     )
+
+#    TODO: SSE2 and SSE4 are redundant on 64 bit CPUs
+#    gcc  -O3 -dM -E - < /dev/null | egrep "SSE|AVX" | sort
+#    SEE2 and 4.1 are already defined with -O3 flag
 
     target_link_libraries(
             questdb
