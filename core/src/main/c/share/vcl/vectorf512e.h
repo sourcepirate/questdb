@@ -370,6 +370,10 @@ public:
         Vec8f(z0).store_nt(p);
         Vec8f(z1).store_nt(p+8);
     }
+    // Required alignment for store_nt call in bytes
+    static constexpr int store_nt_alignment() {
+        return Vec8f::store_nt_alignment();
+    }
     // Member function to store into array, aligned by 64
     // You may use store_a instead of store if you are certain that p points to an address divisible by 64
     void store_a(float * p) const {
@@ -995,6 +999,10 @@ public:
     void store_nt(double * p) const {
         z0.store_nt(p);
         z1.store_nt(p+4);
+    }
+    // Required alignment for store_nt call in bytes
+    static constexpr int store_nt_alignment() {
+        return Vec4d::store_nt_alignment();
     }
     // Member function to store into array, aligned by 64
     // You may use store_a instead of store if you are certain that p points to an address divisible by 64

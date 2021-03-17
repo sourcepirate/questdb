@@ -786,6 +786,10 @@ public:
     void store_nt(void * p) const {
         _mm_stream_si128((__m128i*)p, xmm);
     }
+    // Required alignment for store_nt call in bytes
+    static constexpr int store_nt_alignment() {
+        return 16;
+    }
     // Member function to store into array, aligned by 16
     // "store_a" is faster than "store" on older Intel processors (Pentium 4, Pentium M, Core 1,
     // Merom, Wolfdale, and Atom), but not on other processors from Intel, AMD or VIA.

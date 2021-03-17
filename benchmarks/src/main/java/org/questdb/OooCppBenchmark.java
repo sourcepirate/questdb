@@ -46,8 +46,8 @@ public class OooCppBenchmark {
         System.out.println("MemorySuffle");
         testSetMemoryShuffleToCsv();
 
-        System.out.println("SetMemoryVanilla");
-        testSetMemoryVanillaToCsv();
+//        System.out.println("SetMemoryVanilla");
+//        testSetMemoryVanillaToCsv();
     }
 
 
@@ -57,15 +57,16 @@ public class OooCppBenchmark {
         long src = Unsafe.getUnsafe().allocateMemory(BUFFER_MAX_SIZE);
         long dest = Unsafe.getUnsafe().allocateMemory(BUFFER_MAX_SIZE);
 
+        System.out.println(String.format("src=%d, dest=%d, index=%d\n", src, dest, index));
         Rnd random = new Rnd();
         long size = BUFFER_MAX_SIZE / Long.BYTES;
         for (int i = 0; i < size; i++) {
-            Unsafe.getUnsafe().putLong(index + (i + 1) * Long.BYTES, random.nextBoolean() ? 0 : 1);
+            Unsafe.getUnsafe().putLong(index + (i + 1) * Long.BYTES, random.nextLong() %  size);
         }
 
         try {
             // warmup
-            Vect.indexReshuffle64Bit(index, src, dest, size);
+            Vect.indexReshuffle64Bit(src, dest, index, size);
 
             int iterations = 100;
             for (int i = 1; i < 50; i += 1) {
@@ -86,7 +87,7 @@ public class OooCppBenchmark {
         long size = MB * mb / 8;
 
         for (int j = 0; j < iterations; j++) {
-            Vect.indexReshuffle64Bit(index, src, dest, size);
+            Vect.indexReshuffle64Bit(src, dest, index, size);
         }
         var timeout = System.nanoTime() - nt;
         return Math.round(timeout * 1E-1 / iterations) / 100.0;
@@ -97,7 +98,7 @@ public class OooCppBenchmark {
         long size = MB * mb / 4;
 
         for (int j = 0; j < iterations; j++) {
-            Vect.indexReshuffle32Bit(index, src, dest, size);
+            Vect.indexReshuffle32Bit(src, dest, index, size);
         }
         var timeout = System.nanoTime() - nt;
         return Math.round(timeout * 1E-1 / iterations) / 100.0;
@@ -108,7 +109,7 @@ public class OooCppBenchmark {
         long size = MB * mb / 2;
 
         for (int j = 0; j < iterations; j++) {
-            Vect.indexReshuffle16Bit(index, src, dest, size);
+            Vect.indexReshuffle16Bit(src, dest, index, size);
         }
         var timeout = System.nanoTime() - nt;
         return Math.round(timeout * 1E-1 / iterations) / 100.0;

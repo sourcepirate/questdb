@@ -625,6 +625,10 @@ public:
     void store_nt(float * p) const {
         _mm256_stream_ps(p, ymm);
     }
+    // Required alignment for store_nt call in bytes
+    static constexpr int store_nt_alignment() {
+        return 32;
+    }
     // Member function to store into array, aligned by 32
     // You may use store_a instead of store if you are certain that p points to an address divisible by 32
     void store_a(float * p) const {
@@ -1482,6 +1486,10 @@ public:
     // Member function to store into array (unaligned) with non-temporal memory hint
     void store_nt(double * p) const {
         _mm256_stream_pd(p, ymm);
+    }
+    // Required alignment for store_nt call in bytes
+    static constexpr int store_nt_alignment() {
+        return 32;
     }
     // Member function to store into array, aligned by 32
     // You may use store_a instead of store if you are certain that p points to an address
