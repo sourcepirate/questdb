@@ -327,134 +327,223 @@ inline int64_t align_to_store_nt(T *address, const int64_t max_count, const l_it
     return 0;
 }
 
-template<class T, typename TVec, typename lambda_vec_iteration>
-inline void re_shuffle_internal(const T *src, T *dest, const index_t *index, const int64_t count,
-                                const lambda_vec_iteration l_vec_iteration) {
+template<typename T, typename TVec, typename lambda_iteration, typename lambda_vec_iteration>
+__SIMD_MULTIVERSION__
+inline void run_vec_bulk(T *dest,
+                         const int64_t count,
+                         const lambda_iteration l_iteration,
+                         const lambda_vec_iteration l_vec_iteration) {
 
-    const auto l_iteration = [dest, src, index](int64_t i) { dest[i] = src[index[i].i]; };
     int64_t i = align_to_store_nt<T, TVec::store_nt_alignment()>(dest, count, l_iteration);
 
     if (i >= 0) {
         constexpr int64_t increment = TVec::size();
         const int64_t bulk_stop = count - increment + 1;
         for (; i < bulk_stop; i += increment) {
-            l_vec_iteration(i, src, dest, index);
+            l_vec_iteration(i);
         }
     } else {
         i = 0;
     }
 
     for (; i < count; i++) {
-        dest[i] = src[index[i].i];
+        l_iteration(i);
     }
 }
 
-template<class T, typename TVec, typename lambda_vec_iteration>
+template<class T, typename TVec, int vecsize>
 __SIMD_MULTIVERSION__
-inline void re_shuffle(const jlong src, jlong dest, const jlong index, const jlong count,
-                       const lambda_vec_iteration l_vec_iteration) {
-    re_shuffle_internal<T, TVec>(
-            reinterpret_cast<const T *>(src),
-            reinterpret_cast<T *>(dest),
-            reinterpret_cast<const index_t *>(index),
+inline void re_shuffle(const jlong pSrc, jlong pDest, const jlong pIndex, const jlong count) {
+
+    static_assert(vecsize == 8 || vecsize == 16);
+    auto src = reinterpret_cast<T *>(pSrc);
+    auto dest = reinterpret_cast<T *>(pDest);
+    auto index = reinterpret_cast<index_t *>(pIndex);
+
+    const auto l_iteration = [dest, src, index](int64_t i) {
+        dest[i] = src[index[i].i];
+    };
+
+    const auto bulk_reshuffle = [src, dest, index](const int64_t i) {
+        if constexpr (vecsize == 16) {
+            TVec(src[index[i + 0].i],
+                   src[index[i + 1].i],
+                   src[index[i + 2].i],
+                   src[index[i + 3].i],
+                   src[index[i + 4].i],
+                   src[index[i + 5].i],
+                   src[index[i + 6].i],
+                   src[index[i + 7].i],
+                   src[index[i + 8].i],
+                   src[index[i + 9].i],
+                   src[index[i + 10].i],
+                   src[index[i + 11].i],
+                   src[index[i + 12].i],
+                   src[index[i + 13].i],
+                   src[index[i + 14].i],
+                   src[index[i + 15].i]).store_nt(dest + i);
+        } else {
+            TVec(src[index[i + 0].i],
+                   src[index[i + 1].i],
+                   src[index[i + 2].i],
+                   src[index[i + 3].i],
+                   src[index[i + 4].i],
+                   src[index[i + 5].i],
+                   src[index[i + 6].i],
+                   src[index[i + 7].i]).store_nt(dest + i);
+        }
+    };
+
+    run_vec_bulk<T, TVec>(
+            dest,
             count,
-            l_vec_iteration
+            l_iteration,
+            bulk_reshuffle
     );
 }
 
-template<typename T, typename TVec, typename lambda_vec_iteration>
-__SIMD_MULTIVERSION__
-inline void merge_shuffle_internal(const T *src1, const T *src2, T *dest, const index_t *index, const int64_t count,
-                                   const lambda_vec_iteration l_vec_iteration) {
+template<typename T, typename TVec, int vecsize>
+inline void merge_shuffle(const jlong pSrc1, const jlong pSrc2, jlong pDest, const jlong pIndex, const jlong count) {
+    static_assert(vecsize == 8 || vecsize == 16);
 
+    uint32_t pick_arr[16];
+    auto src1 = reinterpret_cast<T *>(pSrc1);
+    auto src2 = reinterpret_cast<T *>(pSrc2);
+    auto dest = reinterpret_cast<T *>(pDest);
+    auto index = reinterpret_cast<index_t *>(pIndex);
     const T *sources[] = {src2, src1};
-    const auto l_iteration = [dest, index, sources](int64_t i) {
+
+    const auto merge = [dest, index, &sources](int64_t i) {
         const auto r = reinterpret_cast<uint64_t>(index[i].i);
         const uint64_t pick = r >> 63u;
         const auto row = r & ~(1LLu << 63u);
         dest[i] = sources[pick][row];
     };
-    int64_t i = align_to_store_nt<T, TVec::store_nt_alignment()>(dest, count, l_iteration);
 
-    if (i >= 0) {
-        constexpr int64_t increment = TVec::size();
-        const int64_t bulk_stop = count - increment + 1;
-        for (; i < bulk_stop; i += increment) {
-            l_vec_iteration(i, sources, dest, index);
+    const auto bulk_merge = [&pick_arr, dest, index, sources](const int64_t i) {
+        constexpr uint64_t row_mask = ~(1LLu << 63u);
+        if constexpr (vecsize == 16) {
+            // index is 2 longs
+            // that is 4 ints. Source flag is highest bit
+            // Take it as last bit of 4th integer
+            Vec16ui ind = gather16i<3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 55, 59, 63>(index + i);
+            ind >>= 31u;
+            ind.store(pick_arr);
+
+            TVec(sources[pick_arr[0]][(index[i + 0].i) & row_mask],
+                 sources[pick_arr[1]][(index[i + 1].i) & row_mask],
+                 sources[pick_arr[2]][(index[i + 2].i) & row_mask],
+                 sources[pick_arr[3]][(index[i + 3].i) & row_mask],
+                 sources[pick_arr[4]][(index[i + 4].i) & row_mask],
+                 sources[pick_arr[5]][(index[i + 5].i) & row_mask],
+                 sources[pick_arr[6]][(index[i + 6].i) & row_mask],
+                 sources[pick_arr[7]][(index[i + 7].i) & row_mask],
+                 sources[pick_arr[8]][(index[i + 8].i) & row_mask],
+                 sources[pick_arr[9]][(index[i + 9].i) & row_mask],
+                 sources[pick_arr[10]][(index[i + 10].i) & row_mask],
+                 sources[pick_arr[11]][(index[i + 11].i) & row_mask],
+                 sources[pick_arr[12]][(index[i + 12].i) & row_mask],
+                 sources[pick_arr[13]][(index[i + 13].i) & row_mask],
+                 sources[pick_arr[14]][(index[i + 14].i) & row_mask],
+                 sources[pick_arr[15]][(index[i + 15].i) & row_mask]
+            ).store_nt(dest + i);
+        } else {
+            Vec8ui ind = gather8i<3, 7, 11, 15, 19, 23, 27, 31>(index + i);
+            ind >>= 31u;
+            ind.store(pick_arr);
+
+            TVec(sources[pick_arr[0]][(index[i + 0].i) & row_mask],
+                 sources[pick_arr[1]][(index[i + 1].i) & row_mask],
+                 sources[pick_arr[2]][(index[i + 2].i) & row_mask],
+                 sources[pick_arr[3]][(index[i + 3].i) & row_mask],
+                 sources[pick_arr[4]][(index[i + 4].i) & row_mask],
+                 sources[pick_arr[5]][(index[i + 5].i) & row_mask],
+                 sources[pick_arr[6]][(index[i + 6].i) & row_mask],
+                 sources[pick_arr[7]][(index[i + 7].i) & row_mask]
+            ).store_nt(dest + i);
         }
-    } else {
-        i = 0;
-    }
+    };
 
-    for (; i < count; i++) {
-        const auto r = reinterpret_cast<uint64_t>(index[i].i);
-        const uint64_t pick = r >> 63u;
-        const auto row = r & ~(1LLu << 63u);
-        dest[i] = sources[pick][row];
-    }
-}
-
-template<typename T>
-__SIMD_MULTIVERSION__
-inline void merge_shuffle_internal1(const T *src1, const T *src2, T *dest, const index_t *index, const int64_t count) {
-
-    const T *sources[] = {src2, src1};
-    int64_t i = 0;
-    for (; i < count; i++) {
-        const auto r = reinterpret_cast<uint64_t>(index[i].i);
-        const uint64_t pick = r >> 63u;
-        const auto row = r & ~(1LLu << 63u);
-        dest[i] = sources[pick][row];
-    }
-}
-
-template<typename T, typename TVec, typename lambda_bulk_iteration>
-inline void merge_shuffle(const jlong src1, const jlong src2, jlong dest, const jlong index, const jlong count,
-                          const lambda_bulk_iteration l_iteration) {
-    merge_shuffle_internal<T, TVec>(
-            reinterpret_cast<T *>(src1),
-            reinterpret_cast<T *>(src2),
+    run_vec_bulk<T, TVec>(
             reinterpret_cast<T *>(dest),
-            reinterpret_cast<index_t *>(index),
             count,
-            l_iteration
+            merge,
+            bulk_merge
     );
 }
 
-template<typename T>
-inline void merge_shuffle(const jlong src1, const jlong src2, jlong dest, const jlong index, const jlong count) {
-    merge_shuffle_internal1<T>(
-            reinterpret_cast<T *>(src1),
-            reinterpret_cast<T *>(src2),
-            reinterpret_cast<T *>(dest),
-            reinterpret_cast<index_t *>(index),
-            count
-    );
-}
+template<typename T, typename TVec, int vecsize>
+inline void
+merge_shuffle_top(const jlong pSrc1, const jlong pSrc2, jlong pDest, const jlong pIndex, const jlong count,
+                  const jlong topOffset) {
+    static_assert(vecsize == 8 || vecsize == 16);
 
-template<class T>
-inline void merge_shuffle_internal_top(T *src1, T *src2, T *dest, index_t *index, int64_t count, int64_t topOffset) {
-    T *sources[] = {src2, src1};
-    int64_t sz = sizeof(T);
-    int64_t shifts[] = {0, static_cast<int64_t>(topOffset / sz)};
-    _mm_prefetch(shifts, _MM_HINT_NTA);
-    for (long i = 0; i < count; i++) {
+    uint32_t pick_arr[16];
+    auto src1 = reinterpret_cast<T *>(pSrc1);
+    auto src2 = reinterpret_cast<T *>(pSrc2);
+    auto dest = reinterpret_cast<T *>(pDest);
+    auto index = reinterpret_cast<index_t *>(pIndex);
+    constexpr int64_t sz = sizeof(T);
+    const int64_t shifts[] = {0, static_cast<int64_t>(topOffset / sz)};
+    const T *sources[] = {src2, src1};
+
+    const auto merge = [dest, index, &shifts, &sources](int64_t i) {
         const auto r = reinterpret_cast<uint64_t>(index[i].i);
         const int64_t pick = r >> 63u;
         const auto row = r & ~(1LLu << 63u);
         dest[i] = sources[pick][row + shifts[pick]];
-    }
-}
+    };
 
-template<class T>
-inline void merge_shuffle_top(jlong src1, jlong src2, jlong dest, jlong index, jlong count, jlong top) {
-    merge_shuffle_internal_top<T>(
-            reinterpret_cast<T *>(src1),
-            reinterpret_cast<T *>(src2),
+    const auto bulk_merge = [&pick_arr, dest, index, &shifts, &sources](const int64_t i) {
+        constexpr uint64_t row_mask = ~(1LLu << 63u);
+
+        if constexpr (vecsize == 16) {
+            // index is 2 longs
+            // that is 4 ints. Source flag is highest bit
+            // Take it as last bit of 4th integer
+            Vec16ui ind = gather16i<3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 55, 59, 63>(index + i);
+            ind >>= 31u;
+            ind.store(pick_arr);
+
+            TVec(sources[pick_arr[0]][((index[i + 0].i) & row_mask) + shifts[pick_arr[0]]],
+                 sources[pick_arr[1]][((index[i + 1].i) & row_mask) + shifts[pick_arr[1]]],
+                 sources[pick_arr[2]][((index[i + 2].i) & row_mask) + shifts[pick_arr[2]]],
+                 sources[pick_arr[3]][((index[i + 3].i) & row_mask) + shifts[pick_arr[3]]],
+                 sources[pick_arr[4]][((index[i + 4].i) & row_mask) + shifts[pick_arr[4]]],
+                 sources[pick_arr[5]][((index[i + 5].i) & row_mask) + shifts[pick_arr[5]]],
+                 sources[pick_arr[6]][((index[i + 6].i) & row_mask) + shifts[pick_arr[6]]],
+                 sources[pick_arr[7]][((index[i + 7].i) & row_mask) + shifts[pick_arr[7]]],
+                 sources[pick_arr[8]][((index[i + 8].i) & row_mask) + shifts[pick_arr[8]]],
+                 sources[pick_arr[9]][((index[i + 9].i) & row_mask) + shifts[pick_arr[9]]],
+                 sources[pick_arr[10]][((index[i + 10].i) & row_mask) + shifts[pick_arr[10]]],
+                 sources[pick_arr[11]][((index[i + 11].i) & row_mask) + shifts[pick_arr[11]]],
+                 sources[pick_arr[12]][((index[i + 12].i) & row_mask) + shifts[pick_arr[12]]],
+                 sources[pick_arr[13]][((index[i + 13].i) & row_mask) + shifts[pick_arr[13]]],
+                 sources[pick_arr[14]][((index[i + 14].i) & row_mask) + shifts[pick_arr[14]]],
+                 sources[pick_arr[15]][((index[i + 15].i) & row_mask) + shifts[pick_arr[15]]]
+            ).store_nt(dest + i);
+        } else {
+            Vec8ui ind = gather8i<3, 7, 11, 15, 19, 23, 27, 31>(index + i);
+            ind >>= 31u;
+            ind.store(pick_arr);
+
+            TVec(sources[pick_arr[0]][(((index[i + 0].i)) & row_mask) + shifts[pick_arr[0]]],
+                 sources[pick_arr[1]][(((index[i + 1].i)) & row_mask) + shifts[pick_arr[1]]],
+                 sources[pick_arr[2]][(((index[i + 2].i)) & row_mask) + shifts[pick_arr[2]]],
+                 sources[pick_arr[3]][(((index[i + 3].i)) & row_mask) + shifts[pick_arr[3]]],
+                 sources[pick_arr[4]][(((index[i + 4].i)) & row_mask) + shifts[pick_arr[4]]],
+                 sources[pick_arr[5]][(((index[i + 5].i)) & row_mask) + shifts[pick_arr[5]]],
+                 sources[pick_arr[6]][(((index[i + 6].i)) & row_mask) + shifts[pick_arr[6]]],
+                 sources[pick_arr[7]][(((index[i + 7].i)) & row_mask) + shifts[pick_arr[7]]]
+            ).store_nt(dest + i);
+        }
+    };
+
+    run_vec_bulk<T, TVec>(
             reinterpret_cast<T *>(dest),
-            reinterpret_cast<index_t *>(index),
             count,
-            top
+            merge,
+            bulk_merge
     );
 }
 
@@ -543,15 +632,15 @@ inline void make_timestamp_index(const int64_t *data, int64_t low, int64_t high,
     static_assert(sizeof(index_t) == 16);
 
     int64_t l = low;
-    Vec8q vec_i = Vec8q((low + 0) | (1ull << 63),
-                        (low + 1) | (1ull << 63),
-                        (low + 2) | (1ull << 63),
-                        (low + 3) | (1ull << 63),
-                        (low + 4) | (1ull << 63),
-                        (low + 5) | (1ull << 63),
-                        (low + 6) | (1ull << 63),
-                        (low + 7) | (1ull << 63));
-    const Vec8q vec8 = Vec8q(8);
+    Vec8q vec_i((low + 0) | (1ull << 63),
+                (low + 1) | (1ull << 63),
+                (low + 2) | (1ull << 63),
+                (low + 3) | (1ull << 63),
+                (low + 4) | (1ull << 63),
+                (low + 5) | (1ull << 63),
+                (low + 6) | (1ull << 63),
+                (low + 7) | (1ull << 63));
+    const Vec8q vec8(8);
     Vec8q vec_ts;
 
     for (; l <= high - 7; l += 8) {
@@ -643,25 +732,16 @@ inline void merge_copy_var_column_top(
 template<typename T, typename TVec>
 inline void set_memory_vanilla(T *addr, const T value, const int64_t count) {
 
-    auto l_iteration = [addr, value](int64_t i) { addr[i] = value; };
-    int64_t i = align_to_store_nt<T, TVec::store_nt_alignment()>(addr, count, l_iteration);
-
-    if (i >= 0) {
-        const TVec vec = TVec(value);
-        constexpr int64_t increment = TVec::size();
-        auto bulk_stop = count - increment + 1;
-        for (; i < bulk_stop; i += increment) {
-            vec.store_nt(addr + i);
-        }
-    } else {
-        // Alignment failed
-        i = 0;
-    }
-
-    // tail
-    for (; i < count; i++) {
+    const auto l_iteration = [addr, value](int64_t i) {
         addr[i] = value;
-    }
+    };
+
+    const TVec vec(value);
+    const auto l_bulk = [&vec, addr](const int64_t i) {
+        vec.store_nt(addr + i);
+    };
+
+    run_vec_bulk<T, TVec>(addr, count, l_iteration, l_bulk);
 }
 
 template<class T>
@@ -673,16 +753,15 @@ inline void set_var_refs(int64_t *addr, const int64_t offset, const int64_t coun
     int64_t i = align_to_store_nt<int64_t, Vec8q::store_nt_alignment()>(addr, count, l_set_address);
 
     if (i >= 0) {
-
-        Vec8q add = Vec8q(vec_inc);
-        Vec8q v_addr = Vec8q(offset + (i + 0) * size,
-                             offset + (i + 1) * size,
-                             offset + (i + 2) * size,
-                             offset + (i + 3) * size,
-                             offset + (i + 4) * size,
-                             offset + (i + 5) * size,
-                             offset + (i + 6) * size,
-                             offset + (i + 7) * size);
+        Vec8q add(vec_inc);
+        Vec8q v_addr(offset + (i + 0) * size,
+                     offset + (i + 1) * size,
+                     offset + (i + 2) * size,
+                     offset + (i + 3) * size,
+                     offset + (i + 4) * size,
+                     offset + (i + 5) * size,
+                     offset + (i + 6) * size,
+                     offset + (i + 7) * size);
 
         for (; i < count - 7; i += 8) {
             v_addr.store_nt(addr + i);
@@ -700,27 +779,14 @@ inline void set_var_refs(int64_t *addr, const int64_t offset, const int64_t coun
 }
 
 
-inline void copy_index(index_t *index, int64_t count, int64_t *dest) {
-
-    auto l_iteration = [dest, index](int64_t i) { dest[i] = index[i].ts; };
-    int64_t i = align_to_store_nt<int64_t, Vec8q::store_nt_alignment()>(dest, count, l_iteration);
-    if (i >= 0) {
-
-        int64_t bulk_stop = count - 7;
-        for (; i < bulk_stop; i += 8) {
-            Vec8q tss = gather8q<0, 2, 4, 6, 8, 10, 12, 14>(index + i);
-            tss.store_nt(dest + i);
-        }
-    } else {
-        // Pointer cannot be aligned
-        i = 0;
-    }
-
-    // tail
-    for (; i < count; i++) {
+inline void copy_index(const index_t *index, const int64_t count, int64_t *dest) {
+    auto l_iteration = [dest, index](int64_t i) {
         dest[i] = index[i].ts;
-    }
-
+    };
+    auto l_bulk = [dest, index] (int64_t i) {
+        gather8q<0, 2, 4, 6, 8, 10, 12, 14>(index + i).store_nt(dest + i);
+    };
+    run_vec_bulk<int64_t, Vec8q>(dest, count, l_iteration, l_bulk);
 }
 
 extern "C" {
@@ -885,152 +951,56 @@ __SIMD_MULTIVERSION__
 JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_indexReshuffle32Bit(JNIEnv *env, jclass cl, jlong pSrc, jlong pDest, jlong pIndex,
                                              jlong count) {
-    const auto bulk_reshuffle = [](const int64_t i, const int32_t *src, int32_t *dest, const index_t *index) {
-        Vec16i(src[index[i + 0].i],
-               src[index[i + 1].i],
-               src[index[i + 2].i],
-               src[index[i + 3].i],
-               src[index[i + 4].i],
-               src[index[i + 5].i],
-               src[index[i + 6].i],
-               src[index[i + 7].i],
-               src[index[i + 8].i],
-               src[index[i + 9].i],
-               src[index[i + 10].i],
-               src[index[i + 11].i],
-               src[index[i + 12].i],
-               src[index[i + 13].i],
-               src[index[i + 14].i],
-               src[index[i + 15].i]).store_nt(dest + i);
-    };
-    re_shuffle<int32_t, Vec16ui>(pSrc, pDest, pIndex, count, bulk_reshuffle);
+    re_shuffle<int32_t, Vec16i, 16>(pSrc, pDest, pIndex, count);
 }
 
 __SIMD_MULTIVERSION__
 JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_indexReshuffle64Bit(JNIEnv *env, jclass cl, jlong pSrc, jlong pDest, jlong pIndex,
                                              jlong count) {
-    const auto bulk_reshuffle = [](const int64_t i, const int64_t *src, int64_t *dest, const index_t *index) {
-        Vec8q(src[index[i + 0].i],
-              src[index[i + 1].i],
-              src[index[i + 2].i],
-              src[index[i + 3].i],
-              src[index[i + 4].i],
-              src[index[i + 5].i],
-              src[index[i + 6].i],
-              src[index[i + 7].i]).store_nt(dest + i);
-    };
-    re_shuffle<int64_t, Vec8q>(pSrc, pDest, pIndex, count, bulk_reshuffle);
+    re_shuffle<int64_t, Vec8q, 8>(pSrc, pDest, pIndex, count);
 }
 
 __SIMD_MULTIVERSION__
 JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_indexReshuffle16Bit(JNIEnv *env, jclass cl, jlong pSrc, jlong pDest, jlong pIndex,
                                              jlong count) {
-    const auto bulk_reshuffle = [](const int64_t i, const int16_t *src, int16_t *dest, const index_t *index) {
-        Vec16s(src[index[i + 0].i],
-               src[index[i + 1].i],
-               src[index[i + 2].i],
-               src[index[i + 3].i],
-               src[index[i + 4].i],
-               src[index[i + 5].i],
-               src[index[i + 6].i],
-               src[index[i + 7].i],
-               src[index[i + 8].i],
-               src[index[i + 9].i],
-               src[index[i + 10].i],
-               src[index[i + 11].i],
-               src[index[i + 12].i],
-               src[index[i + 13].i],
-               src[index[i + 14].i],
-               src[index[i + 15].i]
-        ).store_nt(dest + i);
-    };
-    re_shuffle<int16_t, Vec16us>(pSrc, pDest, pIndex, count, bulk_reshuffle);
+    re_shuffle<int16_t, Vec16s, 16>(pSrc, pDest, pIndex, count);
 }
 
 __SIMD_MULTIVERSION__
 JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_indexReshuffle8Bit(JNIEnv *env, jclass cl, jlong pSrc, jlong pDest, jlong pIndex,
                                             jlong count) {
-    const auto bulk_reshuffle = [](const int64_t i, const int8_t *src, int8_t *dest, const index_t *index) {
-        Vec16c(src[index[i + 0].i],
-               src[index[i + 1].i],
-               src[index[i + 2].i],
-               src[index[i + 3].i],
-               src[index[i + 4].i],
-               src[index[i + 5].i],
-               src[index[i + 6].i],
-               src[index[i + 7].i],
-               src[index[i + 8].i],
-               src[index[i + 9].i],
-               src[index[i + 10].i],
-               src[index[i + 11].i],
-               src[index[i + 12].i],
-               src[index[i + 13].i],
-               src[index[i + 14].i],
-               src[index[i + 15].i]
-        ).store_nt(dest + i);
-    };
-    re_shuffle<int8_t, Vec16c>(pSrc, pDest, pIndex, count, bulk_reshuffle);
+    re_shuffle<int8_t, Vec16c, 16>(pSrc, pDest, pIndex, count);
 }
 
 __SIMD_MULTIVERSION__
 JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_mergeShuffle8Bit(JNIEnv *env, jclass cl, jlong src1, jlong src2, jlong dest, jlong index,
                                           jlong count) {
-
-
-//    const auto bulk_merge = [](const int64_t i, const int8_t ** sources, int8_t *dest, const index_t *index) {
-//
-//        Vec16ui ind = gather16i<2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47>(index + i);
-//        Vec16ui pick = ind >> 32u;
-//        constexpr uint64_t row_mask = ~(1LLu << 63u);
-//        uint16_t pick_arr[8];
-//        pick.store(pick_arr);
-//
-//        Vec16c(sources[pick_arr[0]][index[0].i & row_mask],
-//               sources[pick_arr[1]][index[1].i & row_mask],
-//               sources[pick_arr[2]][index[2].i & row_mask],
-//               sources[pick_arr[3]][index[3].i & row_mask],
-//               sources[pick_arr[4]][index[4].i & row_mask],
-//               sources[pick_arr[5]][index[5].i & row_mask],
-//               sources[pick_arr[6]][index[6].i & row_mask],
-//               sources[pick_arr[7]][index[7].i & row_mask],
-//               sources[pick_arr[8]][index[0].i & row_mask],
-//               sources[pick_arr[9]][index[9].i & row_mask],
-//               sources[pick_arr[10]][index[10].i & row_mask],
-//               sources[pick_arr[11]][index[11].i & row_mask],
-//               sources[pick_arr[12]][index[12].i & row_mask],
-//               sources[pick_arr[13]][index[13].i & row_mask],
-//               sources[pick_arr[14]][index[14].i & row_mask],
-//               sources[pick_arr[15]][index[15].i & row_mask]
-//        ).store_nt(dest + i);
-//    };
-//     merge_shuffle<int8_t,Vec16c>(src1, src2, dest, index, count, bulk_merge);
-
-    merge_shuffle<int8_t>(src1, src2, dest, index, count);
+    merge_shuffle<int8_t, Vec16c, 16>(src1, src2, dest, index, count);
 }
 
 __SIMD_MULTIVERSION__
 JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_mergeShuffle16Bit(JNIEnv *env, jclass cl, jlong src1, jlong src2, jlong dest, jlong index,
                                            jlong count) {
-    merge_shuffle<int16_t>(src1, src2, dest, index, count);
+    merge_shuffle<int16_t, Vec16s, 16>(src1, src2, dest, index, count);
 }
 
 __SIMD_MULTIVERSION__
 JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_mergeShuffle32Bit(JNIEnv *env, jclass cl, jlong src1, jlong src2, jlong dest, jlong index,
                                            jlong count) {
-    merge_shuffle<int32_t>(src1, src2, dest, index, count);
+    merge_shuffle<int32_t, Vec16i, 16>(src1, src2, dest, index, count);
 }
 
 __SIMD_MULTIVERSION__
 JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_mergeShuffle64Bit(JNIEnv *env, jclass cl, jlong src1, jlong src2, jlong dest, jlong index,
                                            jlong count) {
-    merge_shuffle<int64_t>(src1, src2, dest, index, count);
+    merge_shuffle<int64_t, Vec8q, 8>(src1, src2, dest, index, count);
 }
 
 __SIMD_MULTIVERSION__
@@ -1038,7 +1008,7 @@ JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_mergeShuffleWithTop64Bit(JNIEnv *env, jclass cl, jlong src1, jlong src2, jlong dest,
                                                   jlong index,
                                                   jlong count, jlong topOffset) {
-    merge_shuffle_top<int64_t>(src1, src2, dest, index, count, topOffset);
+    merge_shuffle_top<int64_t, Vec8q, 8>(src1, src2, dest, index, count, topOffset);
 }
 
 __SIMD_MULTIVERSION__
@@ -1046,7 +1016,7 @@ JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_mergeShuffleWithTop32Bit(JNIEnv *env, jclass cl, jlong src1, jlong src2, jlong dest,
                                                   jlong index,
                                                   jlong count, jlong topOffset) {
-    merge_shuffle_top<int32_t>(src1, src2, dest, index, count, topOffset);
+    merge_shuffle_top<int32_t, Vec16i, 16>(src1, src2, dest, index, count, topOffset);
 }
 
 __SIMD_MULTIVERSION__
@@ -1054,7 +1024,7 @@ JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_mergeShuffleWithTop16Bit(JNIEnv *env, jclass cl, jlong src1, jlong src2, jlong dest,
                                                   jlong index,
                                                   jlong count, jlong topOffset) {
-    merge_shuffle_top<int16_t>(src1, src2, dest, index, count, topOffset);
+    merge_shuffle_top<int16_t, Vec16s, 16>(src1, src2, dest, index, count, topOffset);
 }
 
 __SIMD_MULTIVERSION__
@@ -1062,7 +1032,7 @@ JNIEXPORT void JNICALL
 Java_io_questdb_std_Vect_mergeShuffleWithTop8Bit(JNIEnv *env, jclass cl, jlong src1, jlong src2, jlong dest,
                                                  jlong index,
                                                  jlong count, jlong topOffset) {
-    merge_shuffle_top<int8_t>(src1, src2, dest, index, count, topOffset);
+    merge_shuffle_top<int8_t, Vec16c, 16>(src1, src2, dest, index, count, topOffset);
 }
 
 __SIMD_MULTIVERSION__
