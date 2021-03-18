@@ -351,6 +351,53 @@ inline void run_vec_bulk(T *dest,
     }
 }
 
+template<typename TVec, typename T>
+TVec lookup_16(Vec8uq add1, Vec8uq add2, const T* src) {
+    constexpr auto scale = sizeof(T);
+    const auto min_pointer = std::min(horizontal_min(add1), horizontal_min(add2));
+    const auto max_pointer = std::max(horizontal_max(add1), horizontal_max(add2));
+    if (max_pointer - min_pointer < INT32_MAX) {
+        if constexpr (scale >= 4) {
+            // read 32bit values
+            const Vec8ui int32_addr1 = compress(add1);
+            const Vec8ui int32_addr2 = compress(add2);
+            Vec16ui int32_addr(add1, add2);
+            return lookup<INT32_MAX>(int32_addr, src, scale);
+
+        }
+    }
+    throw "aasdfasdfas";
+}
+
+template<typename TVec, typename T>
+TVec lookup_8(Vec8uq add1, const T* src) {
+    constexpr auto scale = sizeof(T);
+    const auto min_pointer = horizontal_min(add1);
+    const auto max_pointer = horizontal_max(add1);
+
+    if (max_pointer - min_pointer < INT32_MAX) {
+        if constexpr (scale >= 4) {
+            // read 32bit values
+            const Vec8ui int32_addr1 = compress(add1);
+            return lookup<INT32_MAX>(int32_addr1, src, scale);
+        }
+    }
+    throw "aasdfasdfas";
+}
+
+template<typename TVec, typename T>
+TVec loopup_index(const int64_t i, const index_t * index, const T* src) {
+    constexpr auto vecsize = TVec::size();
+    Vec8uq row_ind1 = gather8q<1, 3, 5, 7, 9, 11, 13, 15>(index + i + 0);
+
+    if constexpr (vecsize == 16) {
+        Vec8uq row_ind2 = gather8q<1, 3, 5, 7, 9, 11, 13, 15>(index + i + 8);
+        return lookup_16<TVec,T>(row_ind1, row_ind2, src);
+    } else if constexpr (vecsize == 8) {
+        return lookup_8<TVec,T>(row_ind1, src);
+    }
+}
+
 template<class T, typename TVec, int vecsize>
 __SIMD_MULTIVERSION__
 inline void re_shuffle(const jlong pSrc, jlong pDest, const jlong pIndex, const jlong count) {
@@ -365,33 +412,37 @@ inline void re_shuffle(const jlong pSrc, jlong pDest, const jlong pIndex, const 
     };
 
     const auto bulk_reshuffle = [src, dest, index](const int64_t i) {
-        if constexpr (vecsize == 16) {
-            TVec(src[index[i + 0].i],
-                   src[index[i + 1].i],
-                   src[index[i + 2].i],
-                   src[index[i + 3].i],
-                   src[index[i + 4].i],
-                   src[index[i + 5].i],
-                   src[index[i + 6].i],
-                   src[index[i + 7].i],
-                   src[index[i + 8].i],
-                   src[index[i + 9].i],
-                   src[index[i + 10].i],
-                   src[index[i + 11].i],
-                   src[index[i + 12].i],
-                   src[index[i + 13].i],
-                   src[index[i + 14].i],
-                   src[index[i + 15].i]).store_nt(dest + i);
-        } else {
-            TVec(src[index[i + 0].i],
-                   src[index[i + 1].i],
-                   src[index[i + 2].i],
-                   src[index[i + 3].i],
-                   src[index[i + 4].i],
-                   src[index[i + 5].i],
-                   src[index[i + 6].i],
-                   src[index[i + 7].i]).store_nt(dest + i);
-        }
+            auto values = loopup_index<TVec, T>(i, index, src);
+            values.store_nt(dest + i);
+
+
+//        if constexpr (vecsize == 16) {
+//            TVec(src[index[i + 0].i],
+//                   src[index[i + 1].i],
+//                   src[index[i + 2].i],
+//                   src[index[i + 3].i],
+//                   src[index[i + 4].i],
+//                   src[index[i + 5].i],
+//                   src[index[i + 6].i],
+//                   src[index[i + 7].i],
+//                   src[index[i + 8].i],
+//                   src[index[i + 9].i],
+//                   src[index[i + 10].i],
+//                   src[index[i + 11].i],
+//                   src[index[i + 12].i],
+//                   src[index[i + 13].i],
+//                   src[index[i + 14].i],
+//                   src[index[i + 15].i]).store_nt(dest + i);
+//        } else {
+//            TVec(src[index[i + 0].i],
+//                   src[index[i + 1].i],
+//                   src[index[i + 2].i],
+//                   src[index[i + 3].i],
+//                   src[index[i + 4].i],
+//                   src[index[i + 5].i],
+//                   src[index[i + 6].i],
+//                   src[index[i + 7].i]).store_nt(dest + i);
+//        }
     };
 
     run_vec_bulk<T, TVec>(
